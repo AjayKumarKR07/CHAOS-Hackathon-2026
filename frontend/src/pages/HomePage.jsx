@@ -104,8 +104,8 @@ export function HomePage() {
             <div className="text-xs text-slate-400">Execution Lifecycle</div>
           </div>
           <div className="p-3">
-            <div className="text-2xl font-bold text-emerald-400 font-mono">Real SQL</div>
-            <div className="text-xs text-slate-400">State Verification</div>
+            <div className="text-2xl font-bold text-emerald-400 font-mono">MongoDB</div>
+            <div className="text-xs text-slate-400">Atlas State Verification</div>
           </div>
           <div className="p-3">
             <div className="text-2xl font-bold text-blue-400 font-mono">Bounded</div>

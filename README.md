@@ -77,6 +77,7 @@ $$\text{Plan} \longrightarrow \text{Execute} \longrightarrow \text{Verify} \long
 
 ## 4. What We Built
 
+* **Hands-Free Voice Commands**: Built-in browser speech recognition (Web Speech API) converts spoken English into text directly in the command input with real-time interim results. Features 4 explicit states (`Ready to listen`, `Listening`, `Voice captured`, `Voice recognition error`), accessible mic controls, stop-listening controls, unmount teardown, and duplicate-submission protection without third-party dependencies or API keys.
 * **Natural-Language Task Execution**: Accepts high-level human prompts and converts them into structured plans.
 * **Controlled Tool Execution**: Executes only allowlisted actions (`task.create`, `task.update`, `task.list`, `note.create`, `note.list`, `summary.generate`, `notification.simulate`). Arbitrary code/shell execution is prevented.
 * **Priority-Aware Task Creation**: Persists tasks with `LOW`, `MEDIUM`, `HIGH`, or `URGENT` priority levels, due dates, and statuses (`TODO`, `IN_PROGRESS`, `DONE`).
@@ -92,6 +93,19 @@ $$\text{Plan} \longrightarrow \text{Execute} \longrightarrow \text{Verify} \long
 * **Smart Recovery Analytics**: Tracks operational failure metrics, deduplicates retry events, and displays `N/A` with `"No failures yet"` when zero failures exist (avoiding misleading 100% metrics).
 * **JWT Authentication & User Isolation**: Full user registration/login flow; every database query enforces `{"user_id": current_user["id"]}` so users cannot read or modify another user's data.
 * **Execution History**: Persistent list of past agent runs, execution durations, and final status reports.
+
+### Hands-Free Voice Commands (Web Speech API)
+
+JARVIS features browser-native voice input for hands-free operation without external subscriptions or API keys:
+
+1. **Native Web Speech API**: Leverages `window.SpeechRecognition || window.webkitSpeechRecognition` configured for English (`en-US`) with interim transcription for fluid responsiveness.
+2. **Four Visual States**:
+   * **Ready to listen** (Cyan badge): Microphone is idle, supported, and ready to capture speech.
+   * **Listening** (Pulsing Rose badge): Actively capturing speech with an animated wave/ping dot and a direct **Stop Listening** button.
+   * **Voice captured** (Emerald badge): Spoken command successfully converted into text and placed in the textarea for user review or manual editing.
+   * **Voice recognition error** (Amber badge): Gracefully handles microphone permission denial (`not-allowed`), silent timeouts (`no-speech`), network faults, or unsupported browsers with user guidance.
+3. **Safety & Duplicate Submission Guard**: Clicking **Execute Task** or pressing Enter immediately halts any active speech recognition session, and `handleRunTask` prevents concurrent duplicate executions.
+4. **Browser Compatibility**: Full native support on Chromium-based browsers (Chrome, Edge, Brave, Opera) and Safari. Users on unsupported browsers receive a clear fallback notice while maintaining full text-input functionality.
 
 ---
 

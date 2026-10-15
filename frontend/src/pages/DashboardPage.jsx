@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Bot, 
   Play, 
@@ -16,7 +16,10 @@ import {
   ArrowRight,
   TrendingUp,
   ListTodo,
-  FileText
+  FileText,
+  Mic,
+  MicOff,
+  Square
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { agentService } from '../services/agentService';
@@ -42,6 +45,14 @@ export function DashboardPage() {
   const [toolModalOpen, setToolModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('workflow'); // 'workflow' | 'timeline' | 'analytics'
   const [selectedEvidence, setSelectedEvidence] = useState(null);
+
+  // Voice Command States
+  const [isListening, setIsListening] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState('idle'); // 'idle' | 'listening' | 'captured' | 'error'
+  const [voiceError, setVoiceError] = useState(null);
+  const recognitionRef = useRef(null);
+  const baseTextRef = useRef('');
+  const isSpeechSupported = typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   // Suggestions for prompt
   const suggestions = [
@@ -74,9 +85,139 @@ export function DashboardPage() {
     loadDashboardData();
   }, []);
 
+  // Cleanup speech recognition on page unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
+
+  const handleStartListening = () => {
+    setVoiceError(null);
+    const SpeechRecognition = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+    if (!SpeechRecognition) {
+      setVoiceError('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+      setVoiceStatus('error');
+      return;
+    }
+
+    try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      recognition.maxAlternatives = 1;
+
+      baseTextRef.current = requestText.trim();
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceStatus('listening');
+        setVoiceError(null);
+      };
+
+      recognition.onresult = (event) => {
+        let interim = '';
+        let final = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const item = event.results[i];
+          if (item.isFinal) {
+            final += item[0].transcript;
+          } else {
+            interim += item[0].transcript;
+          }
+        }
+
+        const recognizedPiece = (final || interim).trim();
+        if (recognizedPiece) {
+          const combined = baseTextRef.current 
+            ? `${baseTextRef.current} ${recognizedPiece}` 
+            : recognizedPiece;
+          setRequestText(combined);
+        }
+
+        if (final) {
+          setVoiceStatus('captured');
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('SpeechRecognition error:', event.error);
+        setIsListening(false);
+        setVoiceStatus('error');
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setVoiceError('Microphone permission was denied. Please allow microphone access in your browser settings.');
+        } else if (event.error === 'no-speech') {
+          setVoiceError('No speech was detected. Please click the microphone and speak your command.');
+        } else if (event.error === 'network') {
+          setVoiceError('Network error occurred during speech recognition. Please check your connection.');
+        } else if (event.error === 'aborted') {
+          setVoiceStatus('idle');
+          setVoiceError(null);
+        } else {
+          setVoiceError(`Voice recognition error: ${event.error}`);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        setVoiceStatus((prev) => (prev === 'listening' ? 'captured' : prev));
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch (err) {
+      console.error('Failed to start speech recognition:', err);
+      setIsListening(false);
+      setVoiceStatus('error');
+      setVoiceError(err.message || 'Could not access speech recognition service.');
+    }
+  };
+
+  const handleStopListening = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
+    setIsListening(false);
+    setVoiceStatus((prev) => (prev === 'listening' ? (requestText.trim() ? 'captured' : 'idle') : prev));
+  };
+
+  const handleToggleVoice = () => {
+    if (isListening) {
+      handleStopListening();
+    } else {
+      handleStartListening();
+    }
+  };
+
   const handleRunTask = async (e) => {
     if (e) e.preventDefault();
+    if (isRunning) return; // Prevent duplicate concurrent submissions
     if (!requestText.trim()) return;
+
+    if (isListening) {
+      handleStopListening();
+    }
 
     setError(null);
     setIsRunning(true);
@@ -220,9 +361,48 @@ export function DashboardPage() {
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-violet-500" />
 
         <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-lg font-bold text-white">Natural Language Task Execution</h2>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-cyan-400" />
+              <h2 className="text-lg font-bold text-white">Natural Language Task Execution</h2>
+            </div>
+            {/* Visual State: Ready to listen | Listening | Voice captured | Voice recognition error */}
+            {voiceStatus === 'idle' && (
+              <span 
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-cyan-500/10 text-cyan-300 border border-cyan-500/25"
+                title="Microphone ready for hands-free voice input"
+              >
+                <Mic className="w-3 h-3 text-cyan-400" />
+                <span>Ready to listen</span>
+              </span>
+            )}
+            {voiceStatus === 'listening' && (
+              <span 
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-rose-500/15 text-rose-300 border border-rose-500/35 animate-pulse"
+                title="Speech recognition is actively listening"
+              >
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block" />
+                <span className="font-semibold">Listening...</span>
+              </span>
+            )}
+            {voiceStatus === 'captured' && (
+              <span 
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                title="Spoken command successfully captured into input"
+              >
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                <span>Voice captured</span>
+              </span>
+            )}
+            {voiceStatus === 'error' && (
+              <span 
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/35"
+                title={voiceError || 'Voice recognition error'}
+              >
+                <AlertTriangle className="w-3 h-3 text-amber-400" />
+                <span>Voice recognition error</span>
+              </span>
+            )}
           </div>
 
           {/* Controlled Test Mode Failure Injection Toggle */}
@@ -243,7 +423,7 @@ export function DashboardPage() {
         </div>
 
         {/* Prompt Input Box */}
-        <form onSubmit={handleRunTask} className="space-y-4">
+        <form onSubmit={handleRunTask} className="space-y-3">
           <div className="relative">
             <textarea
               value={requestText}
@@ -251,9 +431,103 @@ export function DashboardPage() {
               placeholder="Give JARVIS a multi-step instruction, e.g. 'Create an urgent task to review API security, write a note with findings, and generate a daily briefing'..."
               rows={3}
               required
-              className="w-full p-4 rounded-xl glass-input text-white text-sm placeholder:text-slate-500 resize-none font-sans leading-relaxed"
+              className="w-full p-4 pr-14 rounded-xl glass-input text-white text-sm placeholder:text-slate-500 resize-none font-sans leading-relaxed focus:border-cyan-500/50"
             />
+
+            {/* Quick In-Textarea Microphone Button */}
+            <button
+              type="button"
+              onClick={handleToggleVoice}
+              disabled={isRunning}
+              title={
+                isListening 
+                  ? 'Stop Listening' 
+                  : isSpeechSupported 
+                    ? 'Voice Input: Ready to listen (Click to speak)' 
+                    : 'Speech recognition not supported in this browser'
+              }
+              aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+              className={`absolute right-3.5 bottom-3.5 p-2 rounded-xl transition-all flex items-center justify-center ${
+                isListening
+                  ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/40 animate-pulse ring-2 ring-rose-400/50'
+                  : 'bg-navy-950/80 hover:bg-cyan-500/20 text-cyan-400 border border-white/10 hover:border-cyan-500/40'
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              {isListening ? (
+                <Square className="w-4 h-4 fill-current" />
+              ) : (
+                <Mic className="w-4 h-4" />
+              )}
+            </button>
           </div>
+
+          {/* Voice State Notification Banners */}
+          {voiceStatus === 'listening' && (
+            <div 
+              role="status" 
+              aria-live="polite"
+              className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center justify-between gap-3 animate-in fade-in duration-150"
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                </span>
+                <span className="font-semibold text-rose-200">Listening...</span>
+                <span className="text-slate-300 hidden sm:inline">Speak your English command into the microphone.</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleStopListening}
+                className="px-3 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0"
+              >
+                <MicOff className="w-3.5 h-3.5" />
+                <span>Stop Listening</span>
+              </button>
+            </div>
+          )}
+
+          {voiceStatus === 'captured' && (
+            <div 
+              role="status" 
+              aria-live="polite"
+              className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs flex items-center justify-between gap-2 animate-in fade-in duration-150"
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span><strong>Voice captured:</strong> Review or edit the recognized text above, then click <strong>Execute Task</strong>.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVoiceStatus('idle')}
+                className="text-slate-400 hover:text-white text-xs px-1 font-mono"
+                title="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {voiceStatus === 'error' && voiceError && (
+            <div 
+              role="alert" 
+              aria-live="assertive"
+              className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between gap-2 animate-in fade-in duration-150"
+            >
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span><strong>Voice recognition notice:</strong> {voiceError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setVoiceError(null); setVoiceStatus('idle'); }}
+                className="text-slate-400 hover:text-white text-xs px-1.5 font-mono"
+                title="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Action Row */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -272,24 +546,57 @@ export function DashboardPage() {
               ))}
             </div>
 
-            {/* Run Button */}
-            <button
-              type="submit"
-              disabled={isRunning || !requestText.trim()}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 via-blue-600 to-violet-600 hover:from-cyan-400 hover:to-violet-500 text-navy-950 font-extrabold text-sm transition-all shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
-            >
-              {isRunning ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Planning & Executing...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>Execute Task</span>
-                </>
-              )}
-            </button>
+            {/* Run Button & Voice Trigger */}
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
+              <button
+                type="button"
+                onClick={handleToggleVoice}
+                disabled={isRunning}
+                title={
+                  isListening 
+                    ? 'Stop listening' 
+                    : isSpeechSupported 
+                      ? 'Voice Input: Ready to listen (Click to speak)' 
+                      : 'Speech recognition not supported in this browser'
+                }
+                aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+                className={`px-3.5 py-2.5 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-all ${
+                  isListening
+                    ? 'bg-rose-500 text-white border-rose-400 shadow-md shadow-rose-500/30 animate-pulse'
+                    : 'glass-panel hover:bg-white/10 text-slate-200 border-white/10'
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                {isListening ? (
+                  <>
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                    <span>Stop Voice</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic className="w-4 h-4 text-cyan-400" />
+                    <span className="hidden sm:inline">Voice Input</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="submit"
+                disabled={isRunning || !requestText.trim()}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 via-blue-600 to-violet-600 hover:from-cyan-400 hover:to-violet-500 text-navy-950 font-extrabold text-sm transition-all shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isRunning ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Planning & Executing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>Execute Task</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </form>
 
