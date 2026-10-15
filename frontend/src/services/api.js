@@ -20,6 +20,16 @@ export async function apiRequest(endpoint, options = {}) {
       return null;
     }
 
+    if (response.status === 401) {
+      // Clear expired credentials and notify auth context without leaking secrets
+      localStorage.removeItem('jarvis_token');
+      localStorage.removeItem('jarvis_user');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('jarvis:session-expired'));
+      }
+      throw new Error('Session expired or unauthorized. Please sign in again.');
+    }
+
     const data = await response.json();
 
     if (!response.ok) {
@@ -29,7 +39,13 @@ export async function apiRequest(endpoint, options = {}) {
 
     return data;
   } catch (error) {
-    console.error(`API Error on [${options.method || 'GET'} ${endpoint}]:`, error);
+    // Sanitized log: strictly exclude tokens, passwords, or credentials
+    const safeEndpoint = endpoint.split('?')[0];
+    const isNetworkError = error?.name === 'TypeError' || error?.message?.includes('Failed to fetch');
+    const safeMessage = isNetworkError 
+      ? 'Network unreachable. Please check your internet connection.' 
+      : (error.message || 'Request failed');
+    console.warn(`[JARVIS API] ${options.method || 'GET'} ${safeEndpoint} - ${safeMessage}`);
     throw error;
   }
 }

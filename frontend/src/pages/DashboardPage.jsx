@@ -31,6 +31,7 @@ import { VerificationEvidenceModal } from '../components/VerificationEvidenceMod
 import { RecoveryAnalyticsPanel } from '../components/RecoveryAnalyticsPanel';
 import { StatusBadge } from '../components/StatusBadge';
 import { ToolRegistryModal } from '../components/ToolRegistryModal';
+import { DeviceSyncStatus } from '../components/DeviceSyncStatus';
 import { Link } from 'react-router-dom';
 
 export function DashboardPage() {
@@ -289,6 +290,9 @@ export function DashboardPage() {
           </button>
         </div>
       </div>
+
+      {/* Cross-Device Synchronization & Connection Status */}
+      <DeviceSyncStatus onSync={loadDashboardData} />
 
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

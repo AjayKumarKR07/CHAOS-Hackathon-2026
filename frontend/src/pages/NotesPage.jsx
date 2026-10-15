@@ -27,6 +27,18 @@ export function NotesPage() {
 
   useEffect(() => {
     loadNotes();
+
+    const handleRevisit = () => {
+      if (document.visibilityState === 'visible') {
+        loadNotes();
+      }
+    };
+    document.addEventListener('visibilitychange', handleRevisit);
+    window.addEventListener('focus', handleRevisit);
+    return () => {
+      document.removeEventListener('visibilitychange', handleRevisit);
+      window.removeEventListener('focus', handleRevisit);
+    };
   }, []);
 
   const handleDelete = async (noteId) => {

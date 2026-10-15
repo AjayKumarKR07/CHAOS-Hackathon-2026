@@ -33,6 +33,18 @@ export function TasksPage() {
 
   useEffect(() => {
     loadTasks();
+
+    const handleRevisit = () => {
+      if (document.visibilityState === 'visible') {
+        loadTasks();
+      }
+    };
+    document.addEventListener('visibilitychange', handleRevisit);
+    window.addEventListener('focus', handleRevisit);
+    return () => {
+      document.removeEventListener('visibilitychange', handleRevisit);
+      window.removeEventListener('focus', handleRevisit);
+    };
   }, [statusFilter, priorityFilter]);
 
   const handleStatusChange = async (taskId, newStatus) => {

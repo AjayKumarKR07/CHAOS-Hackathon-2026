@@ -3,6 +3,7 @@ import { Settings, Database, ShieldCheck, ExternalLink, Server, RefreshCw, Alert
 import { toolService } from '../services/toolService';
 import { getHealthStatus } from '../services/api';
 import { ToolRegistryModal } from '../components/ToolRegistryModal';
+import { DeviceSyncStatus } from '../components/DeviceSyncStatus';
 
 export function SettingsPage() {
   const [toolModalOpen, setToolModalOpen] = useState(false);
@@ -65,6 +66,9 @@ export function SettingsPage() {
       </div>
 
       <div className="space-y-4">
+        {/* Device & Sync Status */}
+        <DeviceSyncStatus onSync={fetchHealth} />
+
         {/* Backend & Database Connection */}
         <div className="glass-panel rounded-2xl border border-white/10 p-6 space-y-4">
           <div className="flex items-center justify-between">

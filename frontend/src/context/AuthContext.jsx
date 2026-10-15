@@ -26,6 +26,13 @@ export function AuthProvider({ children }) {
       }
     }
     initAuth();
+
+    const handleSessionExpired = () => {
+      authService.logout();
+      setUser(null);
+    };
+    window.addEventListener('jarvis:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('jarvis:session-expired', handleSessionExpired);
   }, []);
 
   const login = async (email, password) => {

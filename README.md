@@ -77,6 +77,7 @@ $$\text{Plan} \longrightarrow \text{Execute} \longrightarrow \text{Verify} \long
 
 ## 4. What We Built
 
+* **Multi-Device Support & Cloud Sync**: Seamless cross-device automation and data access backed by MongoDB Atlas. Features device-aware detection (Desktop, Laptop, Tablet, Smartphone), real-time network monitoring (Online/Offline), automatic background refresh upon tab focus or page revisit, a manual "Sync Now" control, concurrent multi-device JWT sessions, and graceful session expiry handling.
 * **Hands-Free Voice Commands**: Built-in browser speech recognition (Web Speech API) converts spoken English into text directly in the command input with real-time interim results. Features 4 explicit states (`Ready to listen`, `Listening`, `Voice captured`, `Voice recognition error`), accessible mic controls, stop-listening controls, unmount teardown, and duplicate-submission protection without third-party dependencies or API keys.
 * **Natural-Language Task Execution**: Accepts high-level human prompts and converts them into structured plans.
 * **Controlled Tool Execution**: Executes only allowlisted actions (`task.create`, `task.update`, `task.list`, `note.create`, `note.list`, `summary.generate`, `notification.simulate`). Arbitrary code/shell execution is prevented.
@@ -93,6 +94,17 @@ $$\text{Plan} \longrightarrow \text{Execute} \longrightarrow \text{Verify} \long
 * **Smart Recovery Analytics**: Tracks operational failure metrics, deduplicates retry events, and displays `N/A` with `"No failures yet"` when zero failures exist (avoiding misleading 100% metrics).
 * **JWT Authentication & User Isolation**: Full user registration/login flow; every database query enforces `{"user_id": current_user["id"]}` so users cannot read or modify another user's data.
 * **Execution History**: Persistent list of past agent runs, execution durations, and final status reports.
+
+### Multi-Device Support & Cross-Device Synchronization
+
+JARVIS is engineered to support seamless productivity across all user workstations, tablets, and mobile devices:
+
+1. **Shared MongoDB Atlas Source of Truth**: All tasks, notes, agent runs, and verification audit trails commit directly to MongoDB Atlas. Tasks created on a laptop are immediately accessible when logging in from a phone or tablet.
+2. **Device-Aware Client Detection**: The interface automatically recognizes the active client's form factor (`Desktop`, `Tablet`, `Mobile`), operating system (`Windows`, `macOS`, `iOS`, `Android`, `Linux`), and browser (`Chrome`, `Edge`, `Safari`, `Firefox`).
+3. **Revisit & Focus Auto-Synchronization**: When switching back to JARVIS from another app or tab, listeners on `visibilitychange` and window `focus` automatically refresh data from MongoDB Atlas (with a 20-second throttle to avoid unnecessary database load).
+4. **Manual "Sync Now" Control**: Users can click **Sync Now** anytime on the Command Center or Settings page to immediately pull the latest verified cloud state across all devices.
+5. **Connection & Offline Awareness**: The client tracks `navigator.onLine` and `online`/`offline` window events, displaying a clear amber warning when offline and automatically resynchronizing upon reconnection.
+6. **Concurrent Multi-Device JWT Sessions**: Users can maintain simultaneous active sessions across multiple devices. Session expiry (401) is handled gracefully without leaking sensitive tokens or passwords in console logs.
 
 ### Hands-Free Voice Commands (Web Speech API)
 
@@ -206,40 +218,43 @@ flowchart TD
 All test suites and production builds were executed and verified against live MongoDB Atlas connections.
 
 ### Latest Validation Results
-* **Backend Test Suite**: **24 passed, 8 warnings in 10.08s**
-* **Frontend Production Build**: **Clean build in 1.06s** (`dist/index.html`, `dist/assets/index-*.js`, `dist/assets/index-*.css`)
+* **Backend Test Suite**: **27 passed, 8 warnings in 8.01s**
+* **Frontend Production Build**: **Clean build in 1.13s** (`dist/index.html`, `dist/assets/index-*.js`, `dist/assets/index-*.css`)
 
 ```text
 ============================= test session starts =============================
 platform win32 -- Python 3.11.9, pytest-8.2.2, pluggy-1.6.0
 rootdir: C:\Users\ajayk\OneDrive\Desktop\CHAOS-Hackathon-2026\backend
 
-tests/test_agent_engine.py::test_multi_step_agent_execution_mongodb PASSED                 [  4%]
-tests/test_agent_engine.py::test_exact_three_step_instruction_execution_and_verification PASSED [  8%]
-tests/test_agent_engine.py::test_partial_failure_skipped_steps_and_recovery PASSED        [ 12%]
-tests/test_agent_engine.py::test_failed_first_step_and_downstream_skipping_and_resumption PASSED [ 16%]
-tests/test_agent_engine.py::test_idempotent_retry_prevents_duplicate_records PASSED       [ 20%]
-tests/test_agent_engine.py::test_summary_generation_with_explicit_note_persistence PASSED [ 25%]
-tests/test_agent_engine.py::test_zero_failure_analytics_reports_na PASSED                 [ 29%]
-tests/test_agent_engine.py::test_genuine_vs_simulated_failure_origin PASSED               [ 33%]
-tests/test_auth.py::test_register_and_login_flow PASSED                                 [ 37%]
-tests/test_data_isolation.py::test_user_data_isolation PASSED                           [ 41%]
-tests/test_evidence_and_analytics.py::test_verification_evidence_endpoint PASSED        [ 45%]
-tests/test_evidence_and_analytics.py::test_smart_recovery_analytics_calculations PASSED  [ 50%]
-tests/test_evidence_and_analytics.py::test_analytics_date_and_status_filtering PASSED    [ 54%]
-tests/test_idempotency.py::test_idempotency_key_deterministic PASSED                    [ 58%]
-tests/test_idempotency.py::test_idempotency_key_differentiates_steps PASSED             [ 62%]
-tests/test_idempotency.py::test_duplicate_task_creation_prevention PASSED               [ 66%]
-tests/test_mongo_connection.py::test_mask_mongo_uri PASSED                              [ 70%]
-tests/test_mongo_connection.py::test_create_indexes PASSED                               [ 75%]
-tests/test_mongo_connection.py::test_database_ping PASSED                                [ 79%]
-tests/test_mongo_connection.py::test_health_check_endpoint PASSED                       [ 83%]
-tests/test_mongo_connection.py::test_database_unavailable_scenario PASSED                [ 87%]
-tests/test_tools.py::test_tool_allowlist_and_specs PASSED                               [ 91%]
-tests/test_verification_and_recovery.py::test_failure_detection_and_safe_recovery_mongodb PASSED [ 95%]
+tests/test_agent_engine.py::test_multi_step_agent_execution_mongodb PASSED                 [  3%]
+tests/test_agent_engine.py::test_exact_three_step_instruction_execution_and_verification PASSED [  7%]
+tests/test_agent_engine.py::test_partial_failure_skipped_steps_and_recovery PASSED        [ 11%]
+tests/test_agent_engine.py::test_failed_first_step_and_downstream_skipping_and_resumption PASSED [ 14%]
+tests/test_agent_engine.py::test_idempotent_retry_prevents_duplicate_records PASSED       [ 18%]
+tests/test_agent_engine.py::test_summary_generation_with_explicit_note_persistence PASSED [ 22%]
+tests/test_agent_engine.py::test_zero_failure_analytics_reports_na PASSED                 [ 25%]
+tests/test_agent_engine.py::test_genuine_vs_simulated_failure_origin PASSED               [ 29%]
+tests/test_auth.py::test_register_and_login_flow PASSED                                 [ 33%]
+tests/test_data_isolation.py::test_user_data_isolation PASSED                           [ 37%]
+tests/test_evidence_and_analytics.py::test_verification_evidence_endpoint PASSED        [ 40%]
+tests/test_evidence_and_analytics.py::test_smart_recovery_analytics_calculations PASSED  [ 44%]
+tests/test_evidence_and_analytics.py::test_analytics_date_and_status_filtering PASSED    [ 48%]
+tests/test_idempotency.py::test_idempotency_key_deterministic PASSED                    [ 51%]
+tests/test_idempotency.py::test_idempotency_key_differentiates_steps PASSED             [ 55%]
+tests/test_idempotency.py::test_duplicate_task_creation_prevention PASSED               [ 59%]
+tests/test_mongo_connection.py::test_mask_mongo_uri PASSED                              [ 62%]
+tests/test_mongo_connection.py::test_create_indexes PASSED                               [ 66%]
+tests/test_mongo_connection.py::test_database_ping PASSED                                [ 70%]
+tests/test_mongo_connection.py::test_health_check_endpoint PASSED                       [ 74%]
+tests/test_mongo_connection.py::test_database_unavailable_scenario PASSED                [ 77%]
+tests/test_multi_device_sync.py::test_multi_device_cross_device_synchronization PASSED    [ 81%]
+tests/test_multi_device_sync.py::test_multi_device_user_isolation PASSED                [ 85%]
+tests/test_multi_device_sync.py::test_expired_or_invalid_session_handling PASSED         [ 88%]
+tests/test_tools.py::test_tool_allowlist_and_specs PASSED                               [ 92%]
+tests/test_verification_and_recovery.py::test_failure_detection_and_safe_recovery_mongodb PASSED [ 96%]
 tests/test_verification_and_recovery.py::test_permanent_errors_not_retried_automatically PASSED [100%]
 
-======================= 24 passed, 8 warnings in 10.08s =======================
+======================= 27 passed, 8 warnings in 8.01s ========================
 ```
 
 > *Note: These results represent local validation runs against the configured test suite and staging database; broader multi-region edge cases remain subject to real-world cloud conditions.*
@@ -298,6 +313,7 @@ CHAOS-Hackathon-2026/
 │       ├── test_evidence_and_analytics.py
 │       ├── test_idempotency.py
 │       ├── test_mongo_connection.py
+│       ├── test_multi_device_sync.py
 │       ├── test_tools.py
 │       └── test_verification_and_recovery.py
 └── frontend/
@@ -310,6 +326,7 @@ CHAOS-Hackathon-2026/
         ├── index.css
         ├── components/
         │   ├── AgentWorkflowVisualizer.jsx
+        │   ├── DeviceSyncStatus.jsx
         │   ├── ExecutionTimeline.jsx
         │   ├── Footer.jsx
         │   ├── Navbar.jsx

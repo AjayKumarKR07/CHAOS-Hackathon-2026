@@ -32,6 +32,18 @@ export function AgentRunsPage() {
 
   useEffect(() => {
     loadRuns();
+
+    const handleRevisit = () => {
+      if (document.visibilityState === 'visible') {
+        loadRuns();
+      }
+    };
+    document.addEventListener('visibilitychange', handleRevisit);
+    window.addEventListener('focus', handleRevisit);
+    return () => {
+      document.removeEventListener('visibilitychange', handleRevisit);
+      window.removeEventListener('focus', handleRevisit);
+    };
   }, []);
 
   const handleStepRetried = async (stepId) => {
