@@ -89,6 +89,8 @@ class AgentExecutor:
         # Stages 4 through 9: Execute, Verify, Recover, Stop or Continue
         run_has_failure = False
         completed_count = 0
+        failed_step_order = None
+        failed_step_action = None
 
         for step in db_steps:
             inject_error = simulate_failure and (failure_step is None or failure_step == step["step_order"])
@@ -105,22 +107,39 @@ class AgentExecutor:
                 completed_count += 1
             else:
                 run_has_failure = True
+                failed_step_order = step["step_order"]
+                failed_step_action = step["action_type"]
                 logger.warning(f"Halting remaining steps in Run #{run_id_str} due to step #{step['step_order']} failure.")
                 break
 
-        # Stage 10: Compile final transparent report
         total_steps = len(db_steps)
         now_completed = datetime.now(timezone.utc)
 
+        # Mark all subsequent planned steps that were not executed as SKIPPED
+        if run_has_failure and failed_step_order is not None:
+            for s in db_steps:
+                if s["step_order"] > failed_step_order:
+                    db.agent_steps.update_one(
+                        {"_id": s["_id"]},
+                        {"$set": {
+                            "status": "SKIPPED",
+                            "error_message": f"Execution halted: Skipped because preceding Step #{failed_step_order} ({failed_step_action}) failed.",
+                            "completed_at": now_completed
+                        }}
+                    )
+
+        # Stage 10: Compile final transparent report
         if not run_has_failure and completed_count == total_steps:
             final_status = "SUCCEEDED"
-            summary = f"All {total_steps} step(s) executed and independently verified in MongoDB Atlas."
-        elif completed_count > 0:
-            final_status = "PARTIAL"
-            summary = f"Completed and verified {completed_count}/{total_steps} step(s). Halted at step #{completed_count + 1}."
+            summary = f"All {total_steps} step(s) completed and independently verified in MongoDB Atlas."
         else:
-            final_status = "FAILED"
-            summary = "Run failed at step 1. No state alterations verified."
+            skipped_count = max(0, total_steps - completed_count - 1)
+            final_status = "PARTIAL" if completed_count > 0 else "FAILED"
+            summary = (
+                f"Completed: {completed_count}/{total_steps} step(s). "
+                f"Failed: Step #{failed_step_order} ({failed_step_action}). "
+                f"Skipped: {skipped_count} dependent action(s)."
+            )
 
         db.agent_runs.update_one(
             {"_id": run_res.inserted_id},
@@ -282,7 +301,7 @@ class AgentExecutor:
         fresh_step = db.agent_steps.find_one({"_id": step["_id"]})
 
         # Re-execute without synthetic failure injection
-        self._execute_and_verify_step(
+        step_ok = self._execute_and_verify_step(
             db=db,
             user_id=user_id_str,
             run_id=str(run_doc["_id"]),
@@ -290,28 +309,59 @@ class AgentExecutor:
             inject_error=False
         )
 
+        # If this step recovered successfully, resume subsequent skipped/pending steps
+        if step_ok:
+            subsequent_steps = list(db.agent_steps.find({
+                "agent_run_id": str(run_doc["_id"]),
+                "step_order": {"$gt": step.get("step_order", 0)},
+                "status": {"$in": ["SKIPPED", "PENDING"]}
+            }).sort("step_order", 1))
+
+            for sub_step in subsequent_steps:
+                db.agent_steps.update_one(
+                    {"_id": sub_step["_id"]},
+                    {"$set": {"status": "PENDING", "error_message": None}}
+                )
+                sub_fresh = db.agent_steps.find_one({"_id": sub_step["_id"]})
+                sub_ok = self._execute_and_verify_step(
+                    db=db,
+                    user_id=user_id_str,
+                    run_id=str(run_doc["_id"]),
+                    step=sub_fresh,
+                    inject_error=False
+                )
+                if not sub_ok:
+                    # If a downstream step fails, halt further execution
+                    break
+
         # Update run status based on all steps
-        all_steps = list(db.agent_steps.find({"agent_run_id": str(run_doc["_id"])}))
+        all_steps = list(db.agent_steps.find({"agent_run_id": str(run_doc["_id"])}).sort("step_order", 1))
         succeeded = [s for s in all_steps if s.get("status") == "SUCCEEDED"]
         failed = [s for s in all_steps if s.get("status") == "FAILED"]
+        skipped = [s for s in all_steps if s.get("status") == "SKIPPED"]
         pending = [s for s in all_steps if s.get("status") == "PENDING"]
 
         if len(succeeded) == len(all_steps):
             new_run_status = "SUCCEEDED"
-            summary = "All steps successfully verified after manual retry."
+            summary = f"All {len(all_steps)} step(s) successfully executed and verified after recovery."
         elif failed:
             new_run_status = "PARTIAL" if succeeded else "FAILED"
-            summary = f"Step #{step.get('step_order')} recovered. {len(failed)} step(s) still failing."
-        elif pending:
+            first_fail = failed[0]
+            summary = f"Step #{step.get('step_order')} recovered. Run halted at Step #{first_fail.get('step_order')} ({first_fail.get('action_type')})."
+        elif skipped:
             new_run_status = "PARTIAL"
-            summary = f"Step #{step.get('step_order')} recovered. {len(succeeded)}/{len(all_steps)} completed."
+            summary = f"Step #{step.get('step_order')} recovered. {len(succeeded)}/{len(all_steps)} completed ({len(skipped)} skipped)."
         else:
-            new_run_status = "SUCCEEDED"
-            summary = "Execution completed."
+            new_run_status = "PARTIAL"
+            summary = f"Recovery executed: {len(succeeded)}/{len(all_steps)} steps verified."
 
         db.agent_runs.update_one(
             {"_id": run_doc["_id"]},
-            {"$set": {"status": new_run_status, "execution_summary": summary}}
+            {"$set": {
+                "status": new_run_status,
+                "execution_summary": summary,
+                "completed_at": datetime.now(timezone.utc)
+            }}
         )
 
         updated_step = db.agent_steps.find_one({"_id": step["_id"]})

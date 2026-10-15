@@ -120,25 +120,44 @@ def get_step_verification_evidence(
             sanitized_evidence[k] = v
 
     record_ids = {}
-    if "verified_task_id" in evidence:
-        record_ids["task_id"] = str(evidence["verified_task_id"])
-    if "verified_note_id" in evidence:
-        record_ids["note_id"] = str(evidence["verified_note_id"])
-    if step.get("result_data") and isinstance(step["result_data"], dict):
-        for rk, rv in step["result_data"].items():
-            if "id" in rk.lower() and not any(sk in rk.lower() for sk in sensitive_keys):
-                record_ids[rk] = str(rv)
-
-    # Build safe human-readable MongoDB query summary
     action = step.get("action_type", "")
+
+    # Truthfully verify referenced records in MongoDB Atlas
     if "task" in action:
-        target_id = record_ids.get("task_id", step.get("action_input", {}).get("task_id", "..."))
-        query_summary = f'db.tasks.find_one({{"_id": "{target_id}", "user_id": "{user_id_str}"}})'
+        task_id = evidence.get("verified_task_id") or (step.get("result_data") or {}).get("task_id")
+        if task_id:
+            real_task = db.tasks.find_one({"$and": [build_id_query(task_id), {"user_id": user_id_str}]})
+            if real_task:
+                record_ids["task_id"] = str(real_task["_id"])
+                query_summary = f'db.tasks.find_one({{"_id": ObjectId("{real_task["_id"]}"), "user_id": "{user_id_str}"}})'
+            else:
+                query_summary = f'db.tasks.find_one({{"_id": "{task_id}", "user_id": "{user_id_str}"}})'
+        else:
+            query_summary = f'db.tasks.find({{"user_id": "{user_id_str}"}})'
     elif "note" in action:
-        target_id = record_ids.get("note_id", step.get("action_input", {}).get("note_id", "..."))
-        query_summary = f'db.notes.find_one({{"_id": "{target_id}", "user_id": "{user_id_str}"}})'
+        note_id = evidence.get("verified_note_id") or (step.get("result_data") or {}).get("note_id")
+        if note_id:
+            real_note = db.notes.find_one({"$and": [build_id_query(note_id), {"user_id": user_id_str}]})
+            if real_note:
+                record_ids["note_id"] = str(real_note["_id"])
+                query_summary = f'db.notes.find_one({{"_id": ObjectId("{real_note["_id"]}"), "user_id": "{user_id_str}"}})'
+            else:
+                query_summary = f'db.notes.find_one({{"_id": "{note_id}", "user_id": "{user_id_str}"}})'
+        else:
+            query_summary = f'db.notes.find({{"user_id": "{user_id_str}"}})'
     elif "summary" in action:
-        query_summary = f'db.tasks.find({{"user_id": "{user_id_str}"}}) & db.notes.find({{"user_id": "{user_id_str}"}})'
+        saved_id = evidence.get("saved_note_id") or (step.get("result_data") or {}).get("saved_note_id")
+        if evidence.get("note_persisted") and saved_id:
+            real_summary_note = db.notes.find_one({"$and": [build_id_query(saved_id), {"user_id": user_id_str}]})
+            if real_summary_note:
+                record_ids["saved_note_id"] = str(real_summary_note["_id"])
+                record_ids["note_persisted"] = "true"
+                query_summary = f'db.tasks.count_documents({{"user_id": "{user_id_str}"}}) & db.notes.find_one({{"_id": ObjectId("{real_summary_note["_id"]}"), "user_id": "{user_id_str}"}})'
+            else:
+                query_summary = f'db.tasks.find({{"user_id": "{user_id_str}"}})'
+        else:
+            record_ids["note_persisted"] = "false"
+            query_summary = f'db.tasks.count_documents({{"user_id": "{user_id_str}"}}) & db.notes.count_documents({{"user_id": "{user_id_str}"}})'
     elif "notification" in action:
         query_summary = f'db.execution_logs.find_one({{"agent_run_id": "{run_id_str}", "user_id": "{user_id_str}"}})'
     else:
@@ -201,10 +220,9 @@ def retry_entire_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent run not found")
 
     run_id_str = str(run_doc["_id"])
-    steps = list(db.agent_steps.find({"agent_run_id": run_id_str, "status": "FAILED"}))
-
-    for step in steps:
-        executor.retry_step(db=db, user_id=current_user["id"], run_id=run_id_str, step_id=str(step["_id"]))
+    first_failed_step = db.agent_steps.find_one({"agent_run_id": run_id_str, "status": "FAILED"}, sort=[("step_order", 1)])
+    if first_failed_step:
+        executor.retry_step(db=db, user_id=current_user["id"], run_id=run_id_str, step_id=str(first_failed_step["_id"]))
 
     updated_run = db.agent_runs.find_one({"_id": run_doc["_id"]})
     all_steps = list(db.agent_steps.find({"agent_run_id": run_id_str}).sort("step_order", 1))
@@ -250,7 +268,7 @@ def get_recovery_analytics(
     """
     Computes Smart Failure Recovery Analytics from actual MongoDB Atlas execution records.
     Features: total runs, failed steps, retry attempts, recovered failures, unresolved failures,
-    recovery success rate (safe division), average duration, and filter support.
+    recovery success rate (safe division / N/A handling), average duration, and filter support.
     """
     from datetime import datetime, timezone, timedelta
     user_id_str = str(current_user["id"])
@@ -270,7 +288,7 @@ def get_recovery_analytics(
 
     user_runs = list(db.agent_runs.find(run_query).sort("created_at", -1))
     run_ids = [str(r["_id"]) for r in user_runs]
-    run_status_map = {str(r["_id"]): r.get("status", "UNKNOWN") for r in user_runs}
+    run_map = {str(r["_id"]): r for r in user_runs}
 
     # Fetch corresponding steps from MongoDB Atlas
     steps = list(db.agent_steps.find({"agent_run_id": {"$in": run_ids}}).sort("created_at", -1)) if run_ids else []
@@ -283,18 +301,28 @@ def get_recovery_analytics(
     recovered_failures = 0
     unresolved_failures = 0
     failed_steps_detail: List[FailedStepRecoveryDetail] = []
+    seen_step_ids = set()
 
     for s in steps:
+        step_id_str = str(s["_id"])
+        if step_id_str in seen_step_ids:
+            continue
+        seen_step_ids.add(step_id_str)
+
         step_status = s.get("status", "PENDING")
         attempts = s.get("attempt_count", 0)
+        recoveries = s.get("recovery_count", 0)
         max_attempts = s.get("max_attempts", 3)
         run_id = str(s.get("agent_run_id"))
+        run_obj = run_map.get(run_id, {})
 
-        if attempts > 1:
-            retry_attempts += (attempts - 1)
+        # Count total retries
+        step_retries = max(0, attempts - 1) + recoveries
+        retry_attempts += step_retries
 
-        is_recovered = bool(s.get("recovered") is True or s.get("recovery_count", 0) > 0 or (attempts > 1 and step_status == "SUCCEEDED"))
-        encountered_failure = (step_status == "FAILED" or is_recovered or attempts > 1 or s.get("error_message") is not None)
+        is_recovered = bool(s.get("recovered") is True or recoveries > 0 or (attempts > 1 and step_status == "SUCCEEDED"))
+        encountered_failure = (step_status == "FAILED" or is_recovered or (attempts > 1) or bool(s.get("error_message")))
+
         if encountered_failure:
             failed_steps += 1
             if step_status == "SUCCEEDED" or is_recovered:
@@ -309,8 +337,17 @@ def get_recovery_analytics(
             tool = tool_registry.get_tool(s.get("action_type", ""))
             is_safe = tool.is_safe_to_retry if tool else True
 
+            err_msg = s.get("error_message") or ""
+            is_injected = bool(
+                run_obj.get("test_mode") is True
+                or run_obj.get("failure_injected") is True
+                or "[simulated" in err_msg.lower()
+                or "simulatedtoolerror" in err_msg.lower()
+            )
+            failure_origin = "TEST_MODE_SIMULATION" if is_injected else "GENUINE_OPERATIONAL"
+
             failed_steps_detail.append(FailedStepRecoveryDetail(
-                step_id=str(s["_id"]),
+                step_id=step_id_str,
                 run_id=run_id,
                 step_order=s.get("step_order", 1),
                 action_type=s.get("action_type", ""),
@@ -319,13 +356,20 @@ def get_recovery_analytics(
                 max_attempts=max_attempts,
                 is_safe_to_retry=is_safe,
                 recovery_status=rec_status,
-                run_status=run_status_map.get(run_id, "UNKNOWN"),
+                run_status=run_obj.get("status", "UNKNOWN"),
+                failure_origin=failure_origin,
+                is_injected=is_injected,
                 created_at=s.get("created_at", now),
                 completed_at=s.get("completed_at")
             ))
 
     total_failures = recovered_failures + unresolved_failures
-    recovery_success_rate = round((recovered_failures / total_failures * 100), 1) if total_failures > 0 else 100.0
+    if total_failures > 0:
+        recovery_success_rate = round((recovered_failures / total_failures * 100), 1)
+        recovery_rate_display = f"{recovery_success_rate}%"
+    else:
+        recovery_success_rate = None
+        recovery_rate_display = "N/A"
 
     # Calculate average execution duration for completed runs
     durations = []
@@ -348,6 +392,7 @@ def get_recovery_analytics(
         recovered_failures=recovered_failures,
         unresolved_failures=unresolved_failures,
         recovery_success_rate=recovery_success_rate,
+        recovery_rate_display=recovery_rate_display,
         recovery_rate_definition="Percentage of encountered failures successfully recovered and verified: (Recovered / (Recovered + Unresolved) * 100)",
         avg_execution_duration_sec=avg_duration,
         failed_steps_detail=failed_steps_detail,

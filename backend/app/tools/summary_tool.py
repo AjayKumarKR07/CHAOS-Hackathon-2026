@@ -64,9 +64,13 @@ class SummaryGenerateTool(BaseTool):
                 "done": done,
                 "urgent_items": urgent,
                 "summary_text": summary_text,
-                "saved_note_id": note_id
+                "saved_note_id": note_id,
+                "internal_note_created": bool(note_id)
             },
-            summary=f"Daily task summary generated: {total} tasks evaluated, {len(urgent)} urgent item(s)."
+            summary=(
+                f"Workload summary generated: {total} task(s) evaluated, {len(urgent)} urgent item(s)."
+                + (f" Saved to internal note #{note_id}." if note_id else " (In-memory summary only; no internal note created).")
+            )
         )
 
     def verify(self, input_data: Dict[str, Any], result: ToolResult, context: ToolContext, db: Database) -> VerificationResult:
@@ -77,24 +81,39 @@ class SummaryGenerateTool(BaseTool):
         if "total_tasks" not in data or "summary_text" not in data:
             return VerificationResult(passed=False, evidence={}, details="Verification failed: Incomplete summary payload.")
 
-        # If saved as note, verify the note exists in MongoDB
-        if input_data.get("save_as_note") and data.get("saved_note_id"):
+        # If saved as note, independently verify the note exists in MongoDB under the authenticated user
+        internal_note_saved = bool(input_data.get("save_as_note") and data.get("saved_note_id"))
+        verified_note_id = None
+
+        if internal_note_saved:
             query = {"$and": [build_id_query(data["saved_note_id"]), {"user_id": str(context.user_id)}]}
             persisted = db.notes.find_one(query)
             if not persisted:
                 return VerificationResult(
                     passed=False,
-                    evidence={"saved_note_id": data["saved_note_id"]},
-                    details="Verification failed: Generated summary note was not found in MongoDB."
+                    evidence={"saved_note_id": data["saved_note_id"], "user_id": str(context.user_id)},
+                    details="Verification failed: Generated summary note was not found in MongoDB Atlas for this user."
                 )
+            verified_note_id = str(persisted["_id"])
+
+        evidence_payload = {
+            "evaluated_tasks": data["total_tasks"],
+            "storage_engine": "MongoDB Atlas",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "note_persisted": internal_note_saved,
+            "internal_note_behavior": (
+                "Created note internally via summary tool" if internal_note_saved
+                else "In-memory summary generation only (no internal note created)"
+            )
+        }
+        if verified_note_id:
+            evidence_payload["saved_note_id"] = verified_note_id
 
         return VerificationResult(
             passed=True,
-            evidence={
-                "evaluated_tasks": data["total_tasks"],
-                "storage_engine": "MongoDB Atlas",
-                "verified_at": datetime.now(timezone.utc).isoformat(),
-                "note_persisted": bool(data.get("saved_note_id"))
-            },
-            details="Verified: Daily summary generated and data points confirmed in MongoDB Atlas."
+            evidence=evidence_payload,
+            details=(
+                f"Verified: Workload summary confirmed in MongoDB Atlas."
+                + (f" Internal note #{verified_note_id} confirmed." if verified_note_id else "")
+            )
         )

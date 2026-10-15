@@ -136,11 +136,17 @@ export function RecoveryAnalyticsPanel({ onStepRecovered }) {
                 <TrendingUp className="w-4 h-4 text-violet-400" />
               </div>
               <div className="text-2xl font-extrabold text-violet-300 font-mono">
-                {data.recovery_success_rate}%
+                {data.recovery_success_rate !== null && data.recovery_success_rate !== undefined
+                  ? `${data.recovery_success_rate}%`
+                  : 'N/A'}
               </div>
               <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1 group relative cursor-help">
                 <HelpCircle className="w-3 h-3 text-violet-400/80" />
-                <span className="truncate">{data.recovered_failures} recovered / {data.recovered_failures + data.unresolved_failures} encountered</span>
+                <span className="truncate">
+                  {data.recovered_failures + data.unresolved_failures > 0
+                    ? `${data.recovered_failures} recovered / ${data.recovered_failures + data.unresolved_failures} encountered`
+                    : 'No failures yet'}
+                </span>
                 {/* Tooltip */}
                 <div className="hidden group-hover:block absolute bottom-full left-0 mb-2 w-64 p-2 bg-navy-950 border border-white/10 rounded-lg text-[10px] text-slate-200 shadow-xl z-20">
                   {data.recovery_rate_definition}
@@ -215,7 +221,7 @@ export function RecoveryAnalyticsPanel({ onStepRecovered }) {
                   <thead className="text-[10px] uppercase font-mono text-slate-400 border-b border-white/10">
                     <tr>
                       <th className="pb-2.5 font-semibold">Run / Step</th>
-                      <th className="pb-2.5 font-semibold">Action</th>
+                      <th className="pb-2.5 font-semibold">Action & Origin</th>
                       <th className="pb-2.5 font-semibold">Error Message</th>
                       <th className="pb-2.5 font-semibold">Attempts</th>
                       <th className="pb-2.5 font-semibold">Recovery Status</th>
@@ -233,8 +239,15 @@ export function RecoveryAnalyticsPanel({ onStepRecovered }) {
                             <span className="text-slate-300 font-bold block">#{item.run_id.slice(-6)}</span>
                             <span className="text-[10px] text-slate-400">Step #{item.step_order}</span>
                           </td>
-                          <td className="py-3 font-mono text-cyan-300 font-semibold">
-                            {item.action_type}
+                          <td className="py-3 font-mono">
+                            <div className="text-cyan-300 font-semibold">{item.action_type}</div>
+                            <span className={`inline-flex items-center text-[9px] px-1.5 py-0.5 rounded mt-1 border ${
+                              item.is_injected
+                                ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                                : 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                            }`}>
+                              {item.is_injected ? 'Test Mode (Injected)' : 'Genuine Failure'}
+                            </span>
                           </td>
                           <td className="py-3 max-w-xs truncate font-mono text-[11px] text-rose-300/90">
                             {item.error_message || 'Timeout / Injected simulated error'}

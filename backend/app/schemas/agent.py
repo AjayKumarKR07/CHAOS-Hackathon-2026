@@ -87,6 +87,8 @@ class FailedStepRecoveryDetail(BaseModel):
     is_safe_to_retry: bool = True
     recovery_status: str  # RECOVERED | UNRESOLVED | RETRY_SCHEDULED
     run_status: str
+    failure_origin: str = "GENUINE_OPERATIONAL"  # TEST_MODE_SIMULATION | GENUINE_OPERATIONAL
+    is_injected: bool = False
     created_at: datetime
     completed_at: Optional[datetime] = None
 
@@ -97,7 +99,8 @@ class RecoveryAnalyticsResponse(BaseModel):
     retry_attempts: int
     recovered_failures: int
     unresolved_failures: int
-    recovery_success_rate: float
+    recovery_success_rate: Optional[float] = None
+    recovery_rate_display: str = "N/A"
     recovery_rate_definition: str
     avg_execution_duration_sec: float
     failed_steps_detail: List[FailedStepRecoveryDetail] = []

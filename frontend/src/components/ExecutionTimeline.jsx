@@ -67,6 +67,7 @@ export function ExecutionTimeline({ steps = [], runId, onStepRetried, onInspectE
         const isFailed = step.status === 'FAILED';
         const isSucceeded = step.status === 'SUCCEEDED';
         const isRunning = step.status === 'RUNNING';
+        const isSkipped = step.status === 'SKIPPED';
         const isRetrying = retryingStepId === step.id;
 
         return (
@@ -79,7 +80,9 @@ export function ExecutionTimeline({ steps = [], runId, onStepRetried, onInspectE
                   ? 'border-emerald-500/30 bg-navy-900/80 shadow-md shadow-emerald-500/5'
                   : isRunning
                     ? 'border-cyan-500/40 bg-navy-900/90 shadow-lg shadow-cyan-500/10'
-                    : 'border-white/10 bg-navy-900/60'
+                    : isSkipped
+                      ? 'border-slate-800 bg-navy-950/40 opacity-75'
+                      : 'border-white/10 bg-navy-900/60'
             }`}
           >
             {/* Step Header */}

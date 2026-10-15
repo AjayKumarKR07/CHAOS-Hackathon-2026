@@ -43,6 +43,12 @@ export function StatusBadge({ status, size = 'md' }) {
       label: 'Retry Scheduled',
       dot: 'bg-violet-400 animate-pulse',
     },
+    SKIPPED: {
+      bg: 'bg-slate-700/20 text-slate-400 border-slate-600/30',
+      icon: Clock,
+      label: 'Skipped',
+      dot: 'bg-slate-500',
+    },
   };
 
   const config = configs[normStatus] || configs.PENDING;
