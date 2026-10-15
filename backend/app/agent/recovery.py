@@ -27,8 +27,15 @@ class RecoveryEngine:
         if not tool.is_safe_to_retry:
             return False, f"Action '{tool.name}' is marked as non-idempotent or non-retryable."
 
-        if "validationerror" in error_message.lower():
+        err_lower = (error_message or "").lower()
+        if "validationerror" in err_lower or "validation error" in err_lower:
             return False, "Input validation failed; retrying with identical inputs will not succeed."
+
+        if any(term in err_lower for term in ["unauthorized", "authentication", "forbidden", "access denied", "jwt"]):
+            return False, "Permanent authentication/authorization error; automated retry cannot succeed."
+
+        if any(term in err_lower for term in ["not found", "does not exist", "404"]):
+            return False, "Target resource not found; automated retry cannot resolve missing entity."
 
         return True, "Safe transient error candidate for retry with exponential backoff."
 

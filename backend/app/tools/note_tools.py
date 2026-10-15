@@ -39,10 +39,31 @@ class NoteCreateTool(BaseTool):
             )
 
         now = datetime.now(timezone.utc)
+
+        # Idempotency check: prevent duplicate note creation on retries
+        if context.idempotency_key:
+            existing_note = db.notes.find_one({
+                "user_id": str(context.user_id),
+                "idempotency_key": context.idempotency_key
+            })
+            if existing_note:
+                note_id = str(existing_note["_id"])
+                return ToolResult(
+                    success=True,
+                    data={
+                        "note_id": note_id,
+                        "title": existing_note.get("title", title),
+                        "idempotent_replay": True,
+                        "created_at": existing_note.get("created_at", now).isoformat()
+                    },
+                    summary=f"Note '{title}' verified via idempotency token (ID #{note_id})."
+                )
+
         note_doc = {
             "user_id": str(context.user_id),
             "title": title,
             "content": content,
+            "idempotency_key": context.idempotency_key,
             "created_at": now,
             "updated_at": now
         }
@@ -68,14 +89,29 @@ class NoteCreateTool(BaseTool):
             )
 
         note_id = result.data.get("note_id")
+        if not note_id:
+            return VerificationResult(
+                passed=False,
+                evidence={},
+                details="Verification failed: Missing note_id in result data."
+            )
+
         query = {"$and": [build_id_query(note_id), {"user_id": str(context.user_id)}]}
         persisted_note = db.notes.find_one(query)
         
         if not persisted_note:
             return VerificationResult(
                 passed=False,
-                evidence={"note_id": str(note_id)},
-                details=f"Verification failed: Note #{note_id} could not be verified in MongoDB Atlas."
+                evidence={"note_id": str(note_id), "user_id": str(context.user_id)},
+                details=f"Verification failed: Note #{note_id} could not be verified in MongoDB Atlas for user #{context.user_id}."
+            )
+
+        expected_title = input_data.get("title", "").strip()
+        if expected_title and persisted_note.get("title") != expected_title:
+            return VerificationResult(
+                passed=False,
+                evidence={"persisted_title": persisted_note.get("title"), "expected_title": expected_title},
+                details="Verification failed: Persisted title does not match requested title."
             )
 
         return VerificationResult(

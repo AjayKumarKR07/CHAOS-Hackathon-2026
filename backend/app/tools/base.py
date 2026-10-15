@@ -8,6 +8,7 @@ class ToolContext(BaseModel):
     agent_run_id: Union[str, int]
     step_order: int
     simulate_failure: bool = False
+    idempotency_key: Optional[str] = None
 
     class Config:
         arbitrary_types_allowed = True

@@ -194,7 +194,8 @@ class AgentExecutor:
                 user_id=user_id,
                 agent_run_id=run_id,
                 step_order=step["step_order"],
-                simulate_failure=inject_error
+                simulate_failure=inject_error,
+                idempotency_key=step.get("idempotency_key")
             )
 
             tool_result = tool.execute(step["action_input"], context, db)
@@ -278,38 +279,42 @@ class AgentExecutor:
         if not step:
             raise ValueError(f"Step #{step_id} not found.")
 
-        # Update run to RUNNING
-        db.agent_runs.update_one({"_id": run_doc["_id"]}, {"$set": {"status": "RUNNING"}})
+        # If step is already SUCCEEDED, avoid re-executing it and directly resume downstream steps
+        if step.get("status") == "SUCCEEDED":
+            step_ok = True
+        else:
+            # Update run to RUNNING
+            db.agent_runs.update_one({"_id": run_doc["_id"]}, {"$set": {"status": "RUNNING"}})
 
-        # Preserve recovery audit trail
-        prev_attempts = step.get("attempt_count", 1)
-        prev_recoveries = step.get("recovery_count", 0) + 1
+            # Preserve recovery audit trail
+            prev_attempts = step.get("attempt_count", 1)
+            prev_recoveries = step.get("recovery_count", 0) + 1
 
-        db.agent_steps.update_one(
-            {"_id": step["_id"]},
-            {"$set": {
-                "status": "PENDING",
-                "error_message": None,
-                "verification_status": "UNVERIFIED",
-                "verification_evidence": None,
-                "attempt_count": prev_attempts,
-                "recovery_count": prev_recoveries,
-                "recovered": True
-            }}
-        )
+            db.agent_steps.update_one(
+                {"_id": step["_id"]},
+                {"$set": {
+                    "status": "PENDING",
+                    "error_message": None,
+                    "verification_status": "UNVERIFIED",
+                    "verification_evidence": None,
+                    "attempt_count": prev_attempts,
+                    "recovery_count": prev_recoveries,
+                    "recovered": True
+                }}
+            )
 
-        fresh_step = db.agent_steps.find_one({"_id": step["_id"]})
+            fresh_step = db.agent_steps.find_one({"_id": step["_id"]})
 
-        # Re-execute without synthetic failure injection
-        step_ok = self._execute_and_verify_step(
-            db=db,
-            user_id=user_id_str,
-            run_id=str(run_doc["_id"]),
-            step=fresh_step,
-            inject_error=False
-        )
+            # Re-execute without synthetic failure injection
+            step_ok = self._execute_and_verify_step(
+                db=db,
+                user_id=user_id_str,
+                run_id=str(run_doc["_id"]),
+                step=fresh_step,
+                inject_error=False
+            )
 
-        # If this step recovered successfully, resume subsequent skipped/pending steps
+        # If this step recovered successfully (or was already succeeded), resume subsequent skipped/pending steps
         if step_ok:
             subsequent_steps = list(db.agent_steps.find({
                 "agent_run_id": str(run_doc["_id"]),
@@ -331,7 +336,20 @@ class AgentExecutor:
                     inject_error=False
                 )
                 if not sub_ok:
-                    # If a downstream step fails, halt further execution
+                    # If a downstream step fails, halt further execution and ensure subsequent steps remain SKIPPED
+                    now_fail = datetime.now(timezone.utc)
+                    db.agent_steps.update_many(
+                        {
+                            "agent_run_id": str(run_doc["_id"]),
+                            "step_order": {"$gt": sub_step.get("step_order", 0)},
+                            "status": {"$in": ["PENDING"]}
+                        },
+                        {"$set": {
+                            "status": "SKIPPED",
+                            "error_message": f"Execution halted: Skipped because preceding Step #{sub_step.get('step_order')} ({sub_step.get('action_type')}) failed.",
+                            "completed_at": now_fail
+                        }}
+                    )
                     break
 
         # Update run status based on all steps

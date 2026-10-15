@@ -51,6 +51,28 @@ class TaskCreateTool(BaseTool):
                 due_at = None
 
         now = datetime.now(timezone.utc)
+
+        # Idempotency check: prevent duplicate task creation on retries
+        if context.idempotency_key:
+            existing_task = db.tasks.find_one({
+                "user_id": str(context.user_id),
+                "idempotency_key": context.idempotency_key
+            })
+            if existing_task:
+                task_id = str(existing_task["_id"])
+                return ToolResult(
+                    success=True,
+                    data={
+                        "task_id": task_id,
+                        "title": existing_task.get("title", title),
+                        "status": existing_task.get("status", status),
+                        "priority": existing_task.get("priority", priority),
+                        "idempotent_replay": True,
+                        "created_at": existing_task.get("created_at", now).isoformat()
+                    },
+                    summary=f"Task '{title}' verified via idempotency token (ID #{task_id})."
+                )
+
         task_doc = {
             "user_id": str(context.user_id),
             "title": title,
@@ -58,6 +80,7 @@ class TaskCreateTool(BaseTool):
             "priority": priority if priority in ["LOW", "MEDIUM", "HIGH", "URGENT"] else "MEDIUM",
             "status": status if status in ["TODO", "IN_PROGRESS", "DONE"] else "TODO",
             "due_at": due_at,
+            "idempotency_key": context.idempotency_key,
             "created_at": now,
             "updated_at": now
         }

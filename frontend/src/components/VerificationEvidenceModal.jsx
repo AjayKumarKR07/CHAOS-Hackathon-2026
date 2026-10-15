@@ -141,6 +141,14 @@ export function VerificationEvidenceModal({ isOpen, onClose, runId, stepId, init
                 </div>
               </div>
 
+              {/* Internal Note / Persistence Behavior Callout */}
+              {evidenceData.verification_evidence?.internal_note_behavior && (
+                <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/25 flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400">Persistence Target:</span>
+                  <span className="text-cyan-300 font-semibold">{evidenceData.verification_evidence.internal_note_behavior}</span>
+                </div>
+              )}
+
               {/* Persisted Document Identifiers */}
               {evidenceData.record_ids && Object.keys(evidenceData.record_ids).length > 0 && (
                 <div className="rounded-xl bg-navy-950/80 border border-white/10 p-4 space-y-2">
@@ -190,17 +198,21 @@ export function VerificationEvidenceModal({ isOpen, onClose, runId, stepId, init
                   </span>
                 </div>
                 <div className="p-3 rounded-xl bg-navy-950/60 border border-white/5">
-                  <span className="text-slate-400 text-[10px] block font-medium">Action Outcome</span>
-                  <span className={`text-sm font-bold font-mono mt-0.5 block ${
-                    evidenceData.status === 'SUCCEEDED' ? 'text-emerald-400' : 'text-rose-400'
-                  }`}>
-                    {evidenceData.status}
+                  <span className="text-slate-400 text-[10px] block font-medium">Storage Mode</span>
+                  <span className="text-xs font-bold font-mono mt-0.5 block truncate">
+                    {evidenceData.verification_evidence?.note_persisted === false
+                      ? <span className="text-cyan-400">In-Memory Only</span>
+                      : <span className="text-emerald-400">Atlas Persisted</span>}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl bg-navy-950/60 border border-white/5">
-                  <span className="text-slate-400 text-[10px] block font-medium">Storage Engine</span>
-                  <span className="text-sm font-bold text-violet-300 font-mono mt-0.5 block truncate">
-                    Atlas Cloud
+                  <span className="text-slate-400 text-[10px] block font-medium">Verified Timestamp</span>
+                  <span className="text-xs font-bold text-violet-300 font-mono mt-0.5 block truncate">
+                    {evidenceData.verification_evidence?.verified_at
+                      ? new Date(evidenceData.verification_evidence.verified_at).toLocaleTimeString()
+                      : evidenceData.completed_at
+                        ? new Date(evidenceData.completed_at).toLocaleTimeString()
+                        : 'Live'}
                   </span>
                 </div>
               </div>

@@ -44,16 +44,27 @@ class SummaryGenerateTool(BaseTool):
 
         note_id = None
         if input_data.get("save_as_note", False):
-            now = datetime.now(timezone.utc)
-            summary_note = {
-                "user_id": user_id_str,
-                "title": f"Daily Summary - {now.strftime('%b %d, %Y')}",
-                "content": summary_text,
-                "created_at": now,
-                "updated_at": now
-            }
-            res = db.notes.insert_one(summary_note)
-            note_id = str(res.inserted_id)
+            summary_idempotency_key = f"{context.idempotency_key}:summary" if context.idempotency_key else None
+            if summary_idempotency_key:
+                existing_summary = db.notes.find_one({
+                    "user_id": user_id_str,
+                    "idempotency_key": summary_idempotency_key
+                })
+                if existing_summary:
+                    note_id = str(existing_summary["_id"])
+
+            if not note_id:
+                now = datetime.now(timezone.utc)
+                summary_note = {
+                    "user_id": user_id_str,
+                    "title": f"Daily Summary - {now.strftime('%b %d, %Y')}",
+                    "content": summary_text,
+                    "idempotency_key": summary_idempotency_key,
+                    "created_at": now,
+                    "updated_at": now
+                }
+                res = db.notes.insert_one(summary_note)
+                note_id = str(res.inserted_id)
 
         return ToolResult(
             success=True,
