@@ -45,3 +45,51 @@ def test_failure_detection_and_safe_recovery_mongodb(client, auth_headers):
     updated_run_res = client.get(f"/api/agent/runs/{run_data['id']}", headers=auth_headers)
     assert updated_run_res.status_code == 200
     assert updated_run_res.json()["status"] in ["SUCCEEDED", "PARTIAL"]
+
+def test_permanent_errors_not_retried_automatically():
+    from app.agent.recovery import recovery_engine
+    from app.tools.registry import tool_registry
+
+    tool = tool_registry.get_tool("task.create")
+    assert tool is not None
+
+    # Validation errors must NOT be retry eligible
+    eligible, reason = recovery_engine.is_retry_eligible(
+        tool=tool,
+        attempt_count=1,
+        max_attempts=3,
+        error_message="ValidationError: Task title cannot be empty."
+    )
+    assert eligible is False
+    assert "validation failed" in reason.lower()
+
+    # Authentication errors must NOT be retry eligible
+    eligible, reason = recovery_engine.is_retry_eligible(
+        tool=tool,
+        attempt_count=1,
+        max_attempts=3,
+        error_message="Unauthorized: Invalid or expired JWT token"
+    )
+    assert eligible is False
+    assert "authentication/authorization" in reason.lower()
+
+    # Resource not found errors must NOT be retry eligible
+    eligible, reason = recovery_engine.is_retry_eligible(
+        tool=tool,
+        attempt_count=1,
+        max_attempts=3,
+        error_message="NotFoundError: Task 6ad0a682 does not exist"
+    )
+    assert eligible is False
+    assert "not found" in reason.lower()
+
+    # Transient error must be retry eligible
+    eligible, reason = recovery_engine.is_retry_eligible(
+        tool=tool,
+        attempt_count=1,
+        max_attempts=3,
+        error_message="NetworkTimeoutError: Upstream socket connection timed out"
+    )
+    assert eligible is True
+    assert "transient" in reason.lower()
+
